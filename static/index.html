@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade Journal · 个人交易经验终端</title>
+<style>
+  :root {
+    --accent: #0066cc;
+    --accent-soft: #e8f1fb;
+    --up: #d6332f;      /* A 股习惯：涨红 */
+    --down: #1a9e5c;    /* 跌绿 */
+    --ink: #1a1d23;
+    --ink-2: #555c68;
+    --ink-3: #8b93a0;
+    --line: #e3e7ed;
+    --bg: #f6f8fa;
+    --card: #ffffff;
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 22px 80px; }
+
+  header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 26px; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 21px; margin: 0; letter-spacing: -.2px; font-weight: 650; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--ink-3); font-size: 12.5px; margin-top: 3px; }
+  .streak { background: var(--accent-soft); color: var(--accent); border-radius: 100px; padding: 7px 16px; font-size: 12.5px; font-weight: 600; }
+
+  nav { display: flex; gap: 4px; background: var(--card); padding: 5px; border-radius: 14px; margin-bottom: 22px; overflow-x: auto; }
+  nav button {
+    flex: 1; min-width: 86px; border: 0; background: transparent; padding: 9px 14px; border-radius: 10px;
+    font: inherit; font-size: 13.5px; color: var(--ink-2); cursor: pointer; transition: .16s; white-space: nowrap;
+  }
+  nav button:hover { color: var(--ink); }
+  nav button.on { background: var(--accent); color: #fff; font-weight: 600; }
+
+  .grid { display: grid; gap: 16px; }
+  .g4 { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .card { background: var(--card); border-radius: var(--radius); padding: 22px 24px; }
+  .card h2 { font-size: 14px; margin: 0 0 4px; font-weight: 650; }
+  .card .hint { font-size: 12px; color: var(--ink-3); margin-bottom: 16px; line-height: 1.5; }
+
+  .metric .label { font-size: 12.5px; color: var(--ink-3); margin-bottom: 6px; }
+  .metric .val { font-size: 27px; font-weight: 660; letter-spacing: -.6px; font-variant-numeric: tabular-nums; }
+  .metric .note { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+  .up { color: var(--up); } .down { color: var(--down); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 600; color: var(--ink-3); font-size: 11.5px; padding: 0 10px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--ink-3); font-size: 13px; padding: 26px 0; text-align: center; }
+
+  label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 5px; font-weight: 500; }
+  input, select, textarea {
+    width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
+    font: inherit; font-size: 13px; color: var(--ink); background: #fff; transition: .16s;
+  }
+  input:focus, select:focus, textarea:focus { outline: 0; border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 62px; }
+  .field { margin-bottom: 13px; }
+  .row { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+  .row3 { display: grid; gap: 12px; grid-template-columns: 1fr 1fr 1fr; }
+
+  button.btn {
+    border: 0; border-radius: 10px; padding: 10px 20px; font: inherit; font-size: 13px; font-weight: 600;
+    background: var(--accent); color: #fff; cursor: pointer; transition: .16s;
+  }
+  button.btn:hover { filter: brightness(1.08); }
+  button.btn.ghost { background: var(--accent-soft); color: var(--accent); }
+  button.btn.danger { background: #fdeceb; color: var(--up); }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 9px; margin-top: 6px; }
+
+  .tag { display: inline-block; font-size: 11px; padding: 2px 9px; border-radius: 100px; font-weight: 600; }
+  .tag.ok { background: #e7f6ee; color: var(--down); }
+  .tag.warn { background: #fff4e5; color: #b5730d; }
+  .tag.bad { background: #fdeceb; color: var(--up); }
+  .tag.flat { background: #eef1f5; color: var(--ink-2); }
+
+  .bar { height: 6px; background: var(--accent-soft); border-radius: 100px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 100px; }
+  .muted { color: var(--ink-3); font-size: 12px; }
+  code { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; background: #f3f5f8; padding: 2px 6px; border-radius: 6px; }
+  .flash { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 11px 22px; border-radius: 12px; font-size: 13px; opacity: 0; transition: .25s; pointer-events: none; z-index: 99; }
+  .flash.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .flash.err { background: var(--up); }
+  section { display: none; } section.on { display: block; }
+  .verdict { font-size: 11.5px; }
+  .fieldchip { display: inline-block; font-size: 11px; color: var(--ink-2); background: #f3f5f8; border-radius: 6px; padding: 3px 8px; margin: 0 5px 5px 0; cursor: pointer; }
+  .fieldchip:hover { background: var(--accent-soft); color: var(--accent); }
+  @media (max-width: 640px) {
+    .row, .row3 { grid-template-columns: 1fr; }
+    .wrap { padding: 18px 14px 60px; }
+    .metric .val { font-size: 23px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>Trade <span>Journal</span></h1>
+      <div class="sub">规则 → 信号 → 操作 → 复盘 · 用统计检验你的交易经验</div>
+    </div>
+    <div class="streak" id="streak">连续记录 0 天</div>
+  </header>
+
+  <nav>
+    <button class="on" data-tab="dash">统计</button>
+    <button data-tab="rules">规则库</button>
+    <button data-tab="trade">记一笔</button>
+    <button data-tab="signals">信号</button>
+    <button data-tab="review">复盘</button>
+  </nav>
+
+  <!-- ============ 统计 ============ -->
+  <section id="tab-dash" class="on">
+    <div class="grid g4" id="metrics" style="margin-bottom:16px"></div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h2>执行偏差</h2>
+      <div class="hint">照规则做 vs 没照做，哪边在赔钱。这张表比任何指标都值钱——多数人的问题不是规则差，是执行跟不上。</div>
+      <div id="gap"></div>
+    </div>
+
+    <div class="grid g2" style="margin-bottom:16px">
+      <div class="card">
+        <h2>规则体检</h2>
+        <div class="hint">按规则分组的期望值。区间跨零说明样本还不够，别急着加仓。</div>
+        <div id="byrule" style="overflow-x:auto"></div>
+      </div>
+      <div class="card">
+        <h2>情绪画像</h2>
+        <div class="hint">哪种状态下最容易赔钱。只看平均数，不改评价。</div>
+        <div id="moods"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>最近平仓</h2>
+      <div class="hint">FIFO 配对后的完整交易，按平仓日期倒序。</div>
+      <div id="trips" style="overflow-x:auto"></div>
+    </div>
+  </section>
+
+  <!-- ============ 规则 ============ -->
+  <section id="tab-rules">
+    <div class="grid g2">
+      <div class="card">
+        <h2>新增规则</h2>
+        <div class="hint">条件必须机器可判定。写不出来说明它还不够明确。</div>
+        <div class="field"><label>规则名</label><input id="r-name" placeholder="例如：均线多头回踩买入"></div>
+        <div class="field">
+          <label>触发条件</label>
+          <textarea id="r-cond" placeholder="close > ma20 and vol_ratio > 1.5 and macd_hist > 0"></textarea>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>类型</label>
+            <select id="r-kind">
+              <option value="entry">入场</option>
+              <option value="exit">离场</option>
+              <option value="risk">风控</option>
+              <option value="filter">过滤</option>
+            </select>
+          </div>
+          <div class="field"><label>版本</label><input id="r-ver" value="v1"></div>
+        </div>
+        <div class="field"><label>押注的市场规律（一句话）</label><input id="r-hyp" placeholder="放量站上20日线，短期有惯性"></div>
+        <div class="field"><label>备注</label><textarea id="r-notes" style="min-height:48px"></textarea></div>
+        <div class="actions">
+          <button class="btn" onclick="saveRule()">保存规则</button>
+          <button class="btn ghost" onclick="checkRule()">校验条件</button>
+        </div>
+        <div style="margin-top:16px">
+          <div class="muted" style="margin-bottom:8px">可用字段（点击插入）</div>
+          <div id="fields"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>规则列表</h2>
+        <div class="hint">条件一改会自动升版本号，历史样本仍归属旧版本。</div>
+        <div id="rulelist" style="overflow-x:auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 交易 ============ -->
+  <section id="tab-trade">
+    <div class="grid g2">
+      <div class="card">
+        <h2>记录操作</h2>
+        <div class="hint">「是否按规则」这一栏是归因的基石，别随手填。</div>
+        <div class="row">
+          <div class="field"><label>代码</label><input id="t-sym" placeholder="600522"></div>
+          <div class="field">
+            <label>方向</label>
+            <select id="t-side"><option value="buy">买入</option><option value="sell">卖出</option></select>
+          </div>
+        </div>
+        <div class="row3">
+          <div class="field"><label>价格</label><input id="t-price" type="number" step="0.01" placeholder="12.35"></div>
+          <div class="field"><label>数量</label><input id="t-qty" type="number" placeholder="1000"></div>
+          <div class="field"><label>费用</label><input id="t-fee" type="number" step="0.01" value="0"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>日期</label><input id="t-date" type="date"></div>
+          <div class="field"><label>仓位%</label><input id="t-pos" type="number" step="1" value="0"></div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>关联规则</label>
+            <select id="t-rule"><option value="">计划外操作</option></select>
+          </div>
+          <div class="field">
+            <label>是否按规则执行</label>
+            <select id="t-followed"><option value="1">是，完全按规则</option><option value="0">否，有偏离</option></select>
+          </div>
+        </div>
+        <div class="field"><label>偏离原因（第一人称，写实话）</label><input id="t-dev" placeholder="怕回撤提前跑了 / 手痒追高"></div>
+        <div class="row">
+          <div class="field">
+            <label>下单时的情绪</label>
+            <select id="t-mood">
+              <option value="">未记录</option>
+              <option>平静</option><option>笃定</option><option>犹豫</option>
+              <option>焦虑</option><option>贪婪</option><option>恐惧</option><option>报复性</option>
+            </select>
+          </div>
+          <div class="field"><label>备注</label><input id="t-notes"></div>
+        </div>
+        <div class="actions"><button class="btn" onclick="saveTrade()">记录</button></div>
+      </div>
+
+      <div class="card">
+        <h2>操作流水</h2>
+        <div class="hint">最近 100 笔。红色=买入，绿色=卖出（A 股习惯）。</div>
+        <div id="tradelist" style="overflow-x:auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 信号 ============ -->
+  <section id="tab-signals">
+    <div class="card" style="margin-bottom:16px">
+      <h2>批量扫描</h2>
+      <div class="hint">粘贴行情快照（JSON 数组），逐条套用所有启用的规则。只做判定，不做推荐——触发不等于该买。</div>
+      <div class="field">
+        <textarea id="s-rows" style="min-height:110px;font-family:Consolas,monospace;font-size:12px" placeholder='[{"symbol":"600522","close":12.4,"ma20":11.8,"vol_ratio":1.8,"macd_hist":0.05,"close_prev":11.7,"ma20_prev":11.75}]'></textarea>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="runScan()">扫描</button>
+        <button class="btn ghost" onclick="loadSampleRows()">填入示例</button>
+      </div>
+      <div id="scanout" style="margin-top:16px"></div>
+    </div>
+
+    <div class="card">
+      <h2>信号记录</h2>
+      <div class="hint">信号 ≠ 成交。放弃的信号也要记，那是检验执行力的样本。</div>
+      <div id="signallist" style="overflow-x:auto"></div>
+    </div>
+  </section>
+
+  <!-- ============ 复盘 ============ -->
+  <section id="tab-review">
+    <div class="grid g2">
+      <div class="card">
+        <h2>写复盘</h2>
+        <div class="hint">只写事实，禁止写「要不是大盘……」。归因决定这个系统有没有用。</div>
+        <div class="row">
+          <div class="field"><label>代码</label><input id="v-sym"></div>
+          <div class="field">
+            <label>结果</label>
+            <select id="v-out"><option value="win">盈利</option><option value="loss">亏损</option><option value="flat">平</option></select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field"><label>盈亏金额</label><input id="v-pnl" type="number" step="0.01" value="0"></div>
+          <div class="field"><label>盈亏%</label><input id="v-pct" type="number" step="0.01" value="0"></div>
+        </div>
+        <div class="field">
+          <label>归因</label>
+          <select id="v-attr">
+            <option value="rule">规则有效/无效</option>
+            <option value="execution">执行偏差</option>
+            <option value="market">系统性风险</option>
+            <option value="luck">运气</option>
+          </select>
+        </div>
+        <div class="field"><label>做对了什么</label><textarea id="v-right"></textarea></div>
+        <div class="field"><label>下次改什么</label><textarea id="v-fix"></textarea></div>
+        <div class="actions"><button class="btn" onclick="saveReview()">保存复盘</button></div>
+      </div>
+
+      <div class="card">
+        <h2>复盘记录</h2>
+        <div class="hint">归因分布能看出你习惯把成败归给谁——这很能说明问题。</div>
+        <div id="attribution" style="margin-bottom:18px"></div>
+        <div id="reviewlist" style="overflow-x:auto"></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+<div class="flash" id="flash"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmt = (n, d = 2) => Number(n ?? 0).toFixed(d);
+const pnlCls = n => Number(n) > 0 ? 'up' : Number(n) < 0 ? 'down' : 'muted';
+const sign = n => Number(n) > 0 ? '+' : '';
+
+function toast(msg, err = false) {
+  const el = $('#flash');
+  el.textContent = msg;
+  el.className = 'flash show' + (err ? ' err' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = 'flash', 2600);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { const j = await res.json(); detail = j.detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// ---------------- tabs
+document.querySelectorAll('nav button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('section').forEach(s => s.classList.toggle('on', s.id === 'tab-' + b.dataset.tab));
+    loadAll();
+  };
+});
+
+// ---------------- 统计
+async function loadDash() {
+  const d = await api('/api/stats');
+  const o = d.overview;
+  $('#streak').textContent = `连续记录 ${d.streak} 天`;
+
+  const metrics = [
+    { label: '完整交易', val: o.round_trips, note: 'FIFO 配对后的笔数', cls: '' },
+    { label: '累计盈亏', val: sign(o.total_pnl) + fmt(o.total_pnl), note: '扣除手续费', cls: pnlCls(o.total_pnl) },
+    { label: '胜率', val: fmt(o.win_rate, 1) + '%', note: '盈利笔数 / 总笔数', cls: '' },
+    { label: '期望值 R', val: sign(o.expectancy_r) + fmt(o.expectancy_r), note: '以 3% 止损折算', cls: pnlCls(o.expectancy_r) },
+    { label: '盈亏比', val: fmt(o.profit_factor), note: '总盈利 / 总亏损', cls: '' },
+    { label: '执行率', val: fmt(o.followed_rate, 1) + '%', note: '按规则执行的比例', cls: o.followed_rate >= 80 ? '' : 'down' },
+    { label: '平均持仓', val: fmt(o.avg_held_days, 1) + ' 天', note: '中短线应在 3-15 天', cls: '' },
+    { label: '平均收益', val: sign(o.avg_pct) + fmt(o.avg_pct) + '%', note: '每笔平均', cls: pnlCls(o.avg_pct) },
+  ];
+  $('#metrics').innerHTML = metrics.map(m => `
+    <div class="card metric">
+      <div class="label">${m.label}</div>
+      <div class="val ${m.cls}">${m.val}</div>
+      <div class="note">${m.note}</div>
+    </div>`).join('');
+
+  // 执行偏差
+  const g = d.execution_gap;
+  if (!g.followed.sample && !g.deviated.sample) {
+    $('#gap').innerHTML = '<div class="empty">还没有平仓记录，先记几笔买卖</div>';
+  } else {
+    const cell = (t, tagCls, tag) => `
+      <div style="flex:1;min-width:180px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span class="tag ${tagCls}">${tag}</span><span class="muted">${t.sample} 笔</span>
+        </div>
+        <div class="val ${pnlCls(t.avg_pct)}" style="font-size:24px;font-weight:650">${sign(t.avg_pct)}${fmt(t.avg_pct)}%</div>
+        <div class="muted">胜率 ${fmt(t.win_rate, 1)}% · 盈亏 ${sign(t.total_pnl)}${fmt(t.total_pnl)}</div>
+      </div>`;
+    const gapText = g.followed.sample && g.deviated.sample
+      ? `照规则做的每笔平均多赚 <b class="${pnlCls(g.gap)}">${sign(g.gap)}${fmt(g.gap)}%</b>`
+      : '两边的样本还不齐，先积累';
+    $('#gap').innerHTML = `
+      <div style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:14px">
+        ${cell(g.followed, 'ok', '按规则')}
+        ${cell(g.deviated, 'bad', '偏离规则')}
+      </div>
+      <div style="border-top:1px solid var(--line);padding-top:13px;font-size:13px">${gapText}</div>`;
+  }
+
+  // 规则体检
+  if (!d.by_rule.length) {
+    $('#byrule').innerHTML = '<div class="empty">暂无数据</div>';
+  } else {
+    $('#byrule').innerHTML = `<table><thead><tr>
+        <th>规则</th><th class="num">样本</th><th class="num">胜率</th>
+        <th class="num">期望R</th><th class="num">95%区间</th><th>结论</th>
+      </tr></thead><tbody>${d.by_rule.map(r => {
+        const done = r.sample >= 30;
+        const isExit = r.kind === 'exit' || r.kind === 'risk';
+        // 离场规则的期望值天然为负（止损就该亏），用颜色区分会误导，统一走中性色
+        const cls = isExit ? 'flat' : (!done ? 'flat' : (r.ci[0] > 0 ? 'ok' : r.ci[1] < 0 ? 'bad' : 'warn'));
+        const kindTag = isExit ? '<span class="tag warn" style="margin-left:6px">离场</span>' : '';
+        return `<tr>
+          <td><div style="font-weight:600">${esc(r.rule_name)}${kindTag}</div>
+              <div class="muted">${esc(r.version)} · 持仓 ${r.avg_held_days} 天</div></td>
+          <td class="num">${r.sample}<div class="bar" style="margin-top:4px"><i style="width:${Math.min(100, r.sample / 30 * 100)}%"></i></div></td>
+          <td class="num">${isExit ? '<span class="muted" title="止损离场本就该亏，胜率不是有效指标">—</span>' : fmt(r.win_rate, 1) + '%'}</td>
+          <td class="num ${isExit ? 'muted' : pnlCls(r.expectancy_r)}">${isExit ? '—' : sign(r.expectancy_r) + fmt(r.expectancy_r)}</td>
+          <td class="num muted">${!isExit && done ? `[${fmt(r.ci[0])}, ${fmt(r.ci[1])}]` : '—'}</td>
+          <td><span class="tag ${cls} verdict">${esc(r.verdict)}</span></td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+  }
+
+  // 情绪
+  if (!d.moods.length) {
+    $('#moods').innerHTML = '<div class="empty">暂无数据</div>';
+  } else {
+    $('#moods').innerHTML = `<table><thead><tr><th>状态</th><th class="num">笔数</th><th class="num">平均</th><th class="num">胜率</th></tr></thead><tbody>${
+      d.moods.map(m => `<tr><td>${esc(m.mood)}</td><td class="num">${m.sample}</td>
+        <td class="num ${pnlCls(m.avg_pct)}">${sign(m.avg_pct)}${fmt(m.avg_pct)}%</td>
+        <td class="num">${fmt(m.win_rate, 1)}%</td></tr>`).join('')
+    }</tbody></table>`;
+  }
+
+  // 最近平仓
+  if (!d.round_trips.length) {
+    $('#trips').innerHTML = '<div class="empty">暂无已平仓交易</div>';
+  } else {
+    $('#trips').innerHTML = `<table><thead><tr>
+        <th>代码</th><th>买入</th><th>卖出</th><th class="num">持仓</th>
+        <th class="num">盈亏%</th><th class="num">盈亏</th><th>执行</th><th>情绪</th>
+      </tr></thead><tbody>${d.round_trips.map(t => `<tr>
+        <td style="font-weight:600">${esc(t.symbol)}</td>
+        <td class="muted">${esc(t.open_date)}</td>
+        <td class="muted">${esc(t.close_date)}</td>
+        <td class="num">${t.held_days}天</td>
+        <td class="num ${pnlCls(t.pnl_pct)}">${sign(t.pnl_pct)}${fmt(t.pnl_pct)}%</td>
+        <td class="num ${pnlCls(t.pnl)}">${sign(t.pnl)}${fmt(t.pnl)}</td>
+        <td>${t.followed ? '<span class="tag ok">按规则</span>' : '<span class="tag bad">偏离</span>'}</td>
+        <td class="muted">${esc(t.mood) || '—'}</td>
+      </tr>`).join('')}</tbody></table>`;
+  }
+}
+
+// ---------------- 规则
+let RULES = [];
+
+async function loadRules() {
+  const [{ items }, fields] = await Promise.all([api('/api/rules'), api('/api/rules/fields')]);
+  RULES = items;
+
+  $('#fields').innerHTML = Object.entries(fields)
+    .map(([k, v]) => `<span class="fieldchip" title="${esc(v)}" onclick="insertField('${k}')">${k}</span>`).join('');
+
+  const opts = items.filter(r => r.active).map(r => `<option value="${r.id}">${esc(r.name)} (${esc(r.version)})</option>`).join('');
+  $('#t-rule').innerHTML = '<option value="">计划外操作</option>' + opts;
+
+  if (!items.length) {
+    $('#rulelist').innerHTML = '<div class="empty">还没有规则。先写下你最有把握的那一条。</div>';
+    return;
+  }
+  $('#rulelist').innerHTML = `<table><thead><tr><th>规则</th><th class="num">版本</th><th>状态</th><th></th></tr></thead><tbody>${
+    items.map(r => `<tr>
+      <td><div style="font-weight:600">${esc(r.name)}</div>
+          <div class="muted" style="margin-top:3px"><code>${esc(r.condition)}</code></div>
+          ${r.hypothesis ? `<div class="muted" style="margin-top:4px">押注：${esc(r.hypothesis)}</div>` : ''}</td>
+      <td class="num muted">${esc(r.version)}</td>
+      <td>${r.active ? '<span class="tag ok">启用</span>' : '<span class="tag flat">已停用</span>'}</td>
+      <td class="num">${r.active ? `<button class="btn ghost" style="padding:5px 12px;font-size:12px" onclick="retireRule(${r.id})">停用</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function insertField(name) {
+  const el = $('#r-cond');
+  el.value = (el.value.trim() ? el.value.trim() + ' ' : '') + name;
+  el.focus();
+}
+
+async function checkRule() {
+  const cond = $('#r-cond').value.trim();
+  if (!cond) return toast('先写条件', true);
+  try {
+    const r = await api('/api/rules/validate', { method: 'POST', body: { condition: cond } });
+    toast(r.ok ? '条件合法，可以保存' : '条件有误：' + r.error, !r.ok);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function saveRule() {
+  const body = {
+    name: $('#r-name').value.trim(),
+    condition: $('#r-cond').value.trim(),
+    kind: $('#r-kind').value,
+    version: $('#r-ver').value.trim() || 'v1',
+    hypothesis: $('#r-hyp').value.trim(),
+    notes: $('#r-notes').value.trim(),
+  };
+  if (!body.name || !body.condition) return toast('规则名和条件都要填', true);
+  try {
+    await api('/api/rules', { method: 'POST', body });
+    toast('规则已保存');
+    $('#r-name').value = ''; $('#r-cond').value = ''; $('#r-hyp').value = ''; $('#r-notes').value = '';
+    loadRules();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function retireRule(id) {
+  if (!confirm('停用后不再参与扫描，历史统计仍保留。确定？')) return;
+  await api(`/api/rules/${id}`, { method: 'DELETE' });
+  toast('已停用');
+  loadRules();
+}
+
+// ---------------- 交易
+async function loadTrades() {
+  const { items } = await api('/api/trades?limit=100');
+  if (!items.length) {
+    $('#tradelist').innerHTML = '<div class="empty">还没有记录</div>';
+    return;
+  }
+  $('#tradelist').innerHTML = `<table><thead><tr>
+      <th>日期</th><th>代码</th><th>方向</th><th class="num">价格</th>
+      <th class="num">数量</th><th>规则</th><th>执行</th><th></th>
+    </tr></thead><tbody>${items.map(t => `<tr>
+      <td class="muted">${esc(t.trade_date)}</td>
+      <td style="font-weight:600">${esc(t.symbol)}</td>
+      <td style="color:${t.side === 'buy' ? 'var(--up)' : 'var(--down)'};font-weight:600">${t.side === 'buy' ? '买' : '卖'}</td>
+      <td class="num">${fmt(t.price)}</td>
+      <td class="num">${t.qty}</td>
+      <td class="muted">${esc(t.rule_name) || '计划外'}</td>
+      <td>${t.followed ? '<span class="tag ok">是</span>' : '<span class="tag bad">偏</span>'}</td>
+      <td class="num"><button class="btn danger" style="padding:3px 10px;font-size:11px" onclick="delTrade(${t.id})">删</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function saveTrade() {
+  const body = {
+    symbol: $('#t-sym').value.trim(),
+    side: $('#t-side').value,
+    price: parseFloat($('#t-price').value),
+    qty: parseInt($('#t-qty').value || '0', 10),
+    trade_date: $('#t-date').value || null,
+    rule_id: $('#t-rule').value ? parseInt($('#t-rule').value, 10) : null,
+    followed: $('#t-followed').value === '1',
+    deviation: $('#t-dev').value.trim(),
+    mood: $('#t-mood').value,
+    position_pct: parseFloat($('#t-pos').value || '0'),
+    fee: parseFloat($('#t-fee').value || '0'),
+    notes: $('#t-notes').value.trim(),
+  };
+  if (!body.symbol || !body.price || !body.qty) return toast('代码、价格、数量必填', true);
+  try {
+    await api('/api/trades', { method: 'POST', body });
+    toast('已记录');
+    ['#t-sym', '#t-price', '#t-qty', '#t-dev', '#t-notes'].forEach(s => $(s).value = '');
+    loadTrades();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delTrade(id) {
+  if (!confirm('删除这笔操作？统计会随之变化。')) return;
+  await api(`/api/trades/${id}`, { method: 'DELETE' });
+  toast('已删除');
+  loadTrades();
+}
+
+// ---------------- 信号
+async function loadSignals() {
+  const { items } = await api('/api/signals?limit=80');
+  if (!items.length) {
+    $('#signallist').innerHTML = '<div class="empty">暂无信号记录</div>';
+    return;
+  }
+  $('#signallist').innerHTML = `<table><thead><tr>
+      <th>日期</th><th>代码</th><th>规则</th><th class="num">价格</th><th>处理</th>
+    </tr></thead><tbody>${items.map(s => {
+      const acted = s.acted === 1 ? '<span class="tag ok">已出手</span>'
+                  : s.acted === 0 ? `<span class="tag bad">放弃</span>`
+                  : '<span class="tag warn">待定</span>';
+      return `<tr>
+        <td class="muted">${esc(s.trade_date)}</td>
+        <td style="font-weight:600">${esc(s.symbol)}</td>
+        <td class="muted">${esc(s.rule_name)} <span style="opacity:.6">${esc(s.rule_version)}</span></td>
+        <td class="num">${s.price ? fmt(s.price) : '—'}</td>
+        <td>${acted}${s.skip_reason ? `<div class="muted">${esc(s.skip_reason)}</div>` : ''}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+function loadSampleRows() {
+  $('#s-rows').value = JSON.stringify([
+    { symbol: '600522', close: 12.40, ma20: 11.80, vol_ratio: 1.85, macd_hist: 0.06, close_prev: 11.72, ma20_prev: 11.75, pct_chg: 3.2 },
+    { symbol: '000001', close: 10.10, ma20: 10.60, vol_ratio: 0.72, macd_hist: -0.04, pct_chg: -1.4, ma60: 10.20 },
+    { symbol: '300750', close: 168.0, ma20: 160.5, vol_ratio: 2.1, macd_hist: 0.9, close_prev: 159.8, ma20_prev: 160.2, rsi14: 68 }
+  ], null, 2);
+}
+
+async function runScan() {
+  let rows;
+  try { rows = JSON.parse($('#s-rows').value); }
+  catch { return toast('JSON 格式不对', true); }
+  if (!Array.isArray(rows)) return toast('需要一个数组', true);
+  try {
+    const r = await api('/api/signals/scan', { method: 'POST', body: { rows } });
+    if (!r.hits.length) {
+      $('#scanout').innerHTML = `<div class="muted">扫了 ${r.scanned_rows} 条行情、${r.rules_evaluated} 条规则，没有触发。这本身就是信息：规则太严，或者市场没给机会。</div>`;
+      return;
+    }
+    $('#scanout').innerHTML = `
+      <div class="muted" style="margin-bottom:10px">扫了 ${r.scanned_rows} 条行情、${r.rules_evaluated} 条规则，触发 ${r.hits.length} 次</div>
+      <table><thead><tr><th>代码</th><th>规则</th><th class="num">价格</th><th></th></tr></thead><tbody>${
+        r.hits.map(h => `<tr>
+          <td style="font-weight:600">${esc(h.symbol)}</td>
+          <td>${esc(h.rule_name)} <span class="muted">${esc(h.rule_version)}</span></td>
+          <td class="num">${h.price != null ? fmt(h.price) : '—'}</td>
+          <td class="num"><button class="btn ghost" style="padding:4px 12px;font-size:12px"
+            onclick='saveSignal(${h.rule_id}, ${JSON.stringify(h.symbol)}, ${h.price ?? 'null'})'>记成信号</button></td>
+        </tr>`).join('')
+      }</tbody></table>`;
+  } catch (e) { toast(e.message, true); }
+}
+
+async function saveSignal(ruleId, symbol, price) {
+  try {
+    await api('/api/signals', { method: 'POST', body: { rule_id: ruleId, symbol, price } });
+    toast('信号已记录');
+    loadSignals();
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------------- 复盘
+async function loadReviews() {
+  const { items } = await api('/api/reviews?limit=60');
+  if (!items.length) {
+    $('#reviewlist').innerHTML = '<div class="empty">还没有复盘</div>';
+    $('#attribution').innerHTML = '';
+    return;
+  }
+  const total = items.length;
+  const names = { rule: '规则', execution: '执行偏差', market: '系统性风险', luck: '运气' };
+  const counts = {};
+  items.forEach(i => counts[i.attribution] = (counts[i.attribution] || 0) + 1);
+  $('#attribution').innerHTML = `<div class="muted" style="margin-bottom:8px">归因分布（${total} 条）</div>` +
+    Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:7px">
+        <span style="width:74px;font-size:12px">${names[k] || k}</span>
+        <div class="bar" style="flex:1"><i style="width:${n / total * 100}%"></i></div>
+        <span class="muted" style="width:30px;text-align:right">${n}</span>
+      </div>`).join('');
+
+  $('#reviewlist').innerHTML = `<table><thead><tr>
+      <th>日期</th><th>代码</th><th>结果</th><th class="num">盈亏%</th><th>归因</th>
+    </tr></thead><tbody>${items.map(r => `<tr>
+      <td class="muted">${esc(r.review_date)}</td>
+      <td style="font-weight:600">${esc(r.symbol)}</td>
+      <td>${r.outcome === 'win' ? '<span class="tag ok">盈利</span>' : r.outcome === 'loss' ? '<span class="tag bad">亏损</span>' : '<span class="tag flat">平</span>'}</td>
+      <td class="num ${pnlCls(r.pnl_pct)}">${sign(r.pnl_pct)}${fmt(r.pnl_pct)}%</td>
+      <td class="muted">${names[r.attribution] || esc(r.attribution)}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function saveReview() {
+  const body = {
+    symbol: $('#v-sym').value.trim(),
+    outcome: $('#v-out').value,
+    pnl: parseFloat($('#v-pnl').value || '0'),
+    pnl_pct: parseFloat($('#v-pct').value || '0'),
+    attribution: $('#v-attr').value,
+    what_went_right: $('#v-right').value.trim(),
+    what_to_fix: $('#v-fix').value.trim(),
+  };
+  if (!body.symbol) return toast('代码必填', true);
+  try {
+    await api('/api/reviews', { method: 'POST', body });
+    toast('复盘已保存');
+    ['#v-sym', '#v-pnl', '#v-pct', '#v-right', '#v-fix'].forEach(s => $(s).value = '');
+    loadReviews();
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------------- boot
+function loadAll() {
+  loadDash().catch(e => toast(e.message, true));
+  loadRules().catch(() => {});
+  loadTrades().catch(() => {});
+  loadSignals().catch(() => {});
+  loadReviews().catch(() => {});
+}
+$('#t-date').value = new Date().toISOString().slice(0, 10);
+loadAll();
+</script>
+</body>
+</html>
