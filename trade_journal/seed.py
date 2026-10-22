@@ -20,6 +20,7 @@ RULES = [
         "kind": "entry",
         "hypothesis": "放量突破中期均线，短期有惯性，中短线可吃 3~5 个点",
         "notes": "核心规则。必须同时满足量能，否则容易假突破。",
+        "stop_loss_pct": 4.0,
     },
     {
         "name": "缩量回踩不破",
@@ -27,6 +28,7 @@ RULES = [
         "kind": "entry",
         "hypothesis": "上升趋势中的缩量回调是洗盘，不是转势",
         "notes": "胜率不高但盈亏比好，靠赚大的覆盖亏小的。",
+        "stop_loss_pct": 3.5,
     },
     {
         "name": "破位离场",
@@ -34,6 +36,7 @@ RULES = [
         "kind": "exit",
         "hypothesis": "跌破10日线且亏损超5%，趋势已坏，不留恋",
         "notes": "这条规则的价值不是赚钱，是限制单笔亏损。",
+        "stop_loss_pct": 5.0,
     },
     {
         "name": "情绪追高",
@@ -41,6 +44,8 @@ RULES = [
         "kind": "entry",
         "hypothesis": "涨停板附近追入，赌次日溢价",
         "notes": "反面案例。故意留着，用数据看它到底亏多少。",
+        # 没有明确止损位，正是这条规则的问题所在
+        "stop_loss_pct": None,
     },
 ]
 
@@ -71,7 +76,8 @@ def seed(seed_value: int = 20261023) -> None:
     rule_ids = []
     for r in RULES:
         rule_ids.append(repo.create_rule(
-            r["name"], r["condition"], r["kind"], r["hypothesis"], r["notes"]
+            r["name"], r["condition"], r["kind"], r["hypothesis"], r["notes"],
+            stop_loss_pct=r.get("stop_loss_pct"),
         ))
     print(f"已创建 {len(rule_ids)} 条规则")
 
@@ -112,10 +118,19 @@ def seed(seed_value: int = 20261023) -> None:
                 if not followed:
                     repo.mark_signal(sig_id, False, dev)
 
+            # 开仓时按规则止损幅度挂单，模拟真实操作。
+            # 故意留一部分不设止损——现实中总有人「先看看再说」，
+            # 这些样本会落到 risk_source=default，让口径透明度那张图有意义。
+            stop_pct = RULES[rule_idx]["stop_loss_pct"] if rule_idx is not None else None
+            stop_price = None
+            if stop_pct and rng.random() < 0.75:
+                stop_price = round(buy * (1 - stop_pct / 100), 2)
+
             repo.create_trade(
                 sym, "buy", buy, qty, entry.isoformat(), sig_id, rid,
                 followed, dev, mood,
                 round(rng.uniform(5, 30), 1), round(qty * buy * 0.0003, 2),
+                stop_price=stop_price,
             )
             repo.create_trade(
                 sym, "sell", sell, qty, exit_.isoformat(), None, rid,

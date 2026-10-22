@@ -24,6 +24,10 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
+# 没记录止损、规则也没配默认止损时的兜底风险基准（百分比）。
+# 这是一个明确的近似值，统计时会计入 risk_source='default' 的占比并如实展示。
+DEFAULT_RISK_PCT = 3.0
+
 
 @dataclass
 class RoundTrip:
@@ -39,6 +43,10 @@ class RoundTrip:
     rule_id: int | None
     followed: bool
     mood: str
+    # 开仓时设定的止损价。为空表示当时没设止损，R 倍数退回默认基准
+    stop_price: float | None = None
+    # 规则上配置的止损百分比，作为没填止损价时的兜底
+    rule_stop_pct: float | None = None
 
     @property
     def pnl(self) -> float:
@@ -61,13 +69,40 @@ class RoundTrip:
             return 0
 
     @property
-    def r_multiple(self) -> float:
-        """以 3% 为止损基准折算的 R 倍数，用于跨股比较。
+    def risk_pct(self) -> float:
+        """开仓时承受的单股风险百分比，即 1R 对应的跌幅。
 
-        这是近似值：真实 R 需要记录止损价，第一版先用固定基准，
-        后续可在 rules 表加 stop_loss 字段替换。
+        优先用真实止损价算，其次用规则默认止损，都没有则退回 3%。
+        这个值越低，说明止损设得越紧，同样的盈利折算出的 R 越大。
         """
-        return round(self.pnl_pct / 3.0, 2)
+        if self.stop_price and self.buy_price and self.stop_price < self.buy_price:
+            pct = (self.buy_price - self.stop_price) / self.buy_price * 100
+            # 止损距离异常小（<0.3%）通常是把止损填错了，退回兜底值以免 R 被放大到离谱
+            if 0.3 <= pct <= 50:
+                return round(pct, 2)
+        if self.rule_stop_pct and 0.3 <= self.rule_stop_pct <= 50:
+            return round(self.rule_stop_pct, 2)
+        return DEFAULT_RISK_PCT
+
+    @property
+    def r_multiple(self) -> float:
+        """R 倍数 = 收益率 / 单股风险百分比，用于跨股票、跨仓位比较。
+
+        这正是「盈亏比」得以成立的基础：赚 10% 但止损 2%（5R）
+        远比赚 10% 但止损 20%（0.5R）优秀。
+        """
+        return round(self.pnl_pct / self.risk_pct, 2)
+
+    @property
+    def risk_source(self) -> str:
+        """风险基准的来源，用于在界面上如实标注统计口径。"""
+        if self.stop_price and self.buy_price and self.stop_price < self.buy_price:
+            pct = (self.buy_price - self.stop_price) / self.buy_price * 100
+            if 0.3 <= pct <= 50:
+                return "actual"
+        if self.rule_stop_pct and 0.3 <= self.rule_stop_pct <= 50:
+            return "rule"
+        return "default"
 
 
 @dataclass
@@ -98,13 +133,25 @@ class RuleStats:
         return round(self.wins / self.sample * 100, 1) if self.sample else 0.0
 
 
-def build_round_trips(trades: Sequence[sqlite3.Row]) -> list[RoundTrip]:
+def build_round_trips(
+    trades: Sequence[sqlite3.Row], rules: dict[int, sqlite3.Row] | None = None
+) -> list[RoundTrip]:
     """FIFO 配对买卖记录为完整交易。
 
     规则：按时间顺序，卖出依次消耗该股票最早的买入。加仓、减仓都能处理。
+    rules 用于取出规则上的默认止损百分比，供没设具体止损价的交易兜底。
     """
+    rules = rules or {}
     lots: dict[str, deque] = defaultdict(deque)
     trips: list[RoundTrip] = []
+
+    def _row_get(row: Any, key: str, default: Any = None) -> Any:
+        """兼容 sqlite3.Row 与普通 dict，缺列时返回默认值。"""
+        try:
+            val = row[key]
+        except (IndexError, KeyError):
+            return default
+        return default if val is None else val
 
     ordered = sorted(trades, key=lambda t: (t["trade_date"], t["id"]))
     for t in ordered:
@@ -119,6 +166,7 @@ def build_round_trips(trades: Sequence[sqlite3.Row]) -> list[RoundTrip]:
                     "rule_id": t["rule_id"],
                     "followed": bool(t["followed"]),
                     "mood": t["mood"] or "",
+                    "stop_price": _row_get(t, "stop_price"),
                 }
             )
             continue
@@ -129,6 +177,8 @@ def build_round_trips(trades: Sequence[sqlite3.Row]) -> list[RoundTrip]:
             lot = lots[sym][0]
             matched = min(remaining, lot["qty"])
             ratio = matched / lot["qty"] if lot["qty"] else 1.0
+            rule = rules.get(lot["rule_id"]) if lot["rule_id"] else None
+            rule_stop = _row_get(rule, "stop_loss_pct") if rule is not None else None
             trips.append(
                 RoundTrip(
                     symbol=sym,
@@ -141,6 +191,8 @@ def build_round_trips(trades: Sequence[sqlite3.Row]) -> list[RoundTrip]:
                     rule_id=lot["rule_id"],
                     followed=lot["followed"],
                     mood=lot["mood"],
+                    stop_price=lot["stop_price"],
+                    rule_stop_pct=rule_stop,
                 )
             )
             lot["qty"] -= matched
@@ -307,6 +359,26 @@ def mood_breakdown(trips: Sequence[RoundTrip]) -> list[dict[str, Any]]:
     return rows
 
 
+def risk_coverage(trips: Sequence[RoundTrip]) -> dict[str, Any]:
+    """R 倍数的口径透明化：多少笔用了真实止损，多少笔只能靠兜底。
+
+    如果大部分交易都落在 default 上，说明期望值 R 这个数字不可全信，
+    界面上必须让用户看到这一点，而不是藏起来。
+    """
+    counts = {"actual": 0, "rule": 0, "default": 0}
+    for t in trips:
+        counts[t.risk_source] = counts.get(t.risk_source, 0) + 1
+    total = len(trips)
+    return {
+        "actual": counts["actual"],
+        "rule": counts["rule"],
+        "default": counts["default"],
+        "total": total,
+        "actual_rate": round(counts["actual"] / total * 100, 1) if total else 0.0,
+        "default_rate": round(counts["default"] / total * 100, 1) if total else 0.0,
+    }
+
+
 def overview(trips: Sequence[RoundTrip]) -> dict[str, Any]:
     """总览：写在首页最上方的那几个数字。"""
     if not trips:
@@ -319,6 +391,7 @@ def overview(trips: Sequence[RoundTrip]) -> dict[str, Any]:
             "profit_factor": 0.0,
             "avg_held_days": 0.0,
             "followed_rate": 0.0,
+            "avg_risk_pct": 0.0,
         }
     pcts = [t.pnl_pct for t in trips]
     rs = [t.r_multiple for t in trips]
@@ -333,4 +406,5 @@ def overview(trips: Sequence[RoundTrip]) -> dict[str, Any]:
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss else 0.0,
         "avg_held_days": round(sum(t.held_days for t in trips) / len(trips), 1),
         "followed_rate": round(sum(1 for t in trips if t.followed) / len(trips) * 100, 1),
+        "avg_risk_pct": round(sum(t.risk_pct for t in trips) / len(trips), 2),
     }

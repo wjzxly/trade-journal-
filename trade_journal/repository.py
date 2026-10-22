@@ -32,12 +32,13 @@ def create_rule(
     hypothesis: str = "",
     notes: str = "",
     version: str = "v1",
+    stop_loss_pct: float | None = None,
 ) -> int:
     with session() as conn:
         cur = conn.execute(
-            """INSERT INTO rules (name, kind, condition, version, hypothesis, notes)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, kind, condition, version, hypothesis, notes),
+            """INSERT INTO rules (name, kind, condition, version, hypothesis, notes, stop_loss_pct)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (name, kind, condition, version, hypothesis, notes, stop_loss_pct),
         )
         return int(cur.lastrowid)
 
@@ -47,7 +48,10 @@ def update_rule(rule_id: int, **fields: Any) -> None:
 
     强制升版是为了保护历史样本的可解释性——改过的规则和新样本不是同一件事。
     """
-    allowed = {"name", "kind", "condition", "hypothesis", "notes", "active", "version"}
+    allowed = {
+        "name", "kind", "condition", "hypothesis", "notes",
+        "active", "version", "stop_loss_pct",
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return
@@ -144,6 +148,7 @@ def create_trade(
     position_pct: float = 0.0,
     fee: float = 0.0,
     notes: str = "",
+    stop_price: float | None = None,
 ) -> int:
     td = trade_date or date.today().isoformat()
     with session() as conn:
@@ -153,12 +158,15 @@ def create_trade(
             if sig and rule_id is None:
                 rule_id = sig["rule_id"]
             conn.execute("UPDATE signals SET acted = 1 WHERE id = ?", (signal_id,))
+        # 卖出单不该带止损价，避免上游误传污染 R 倍数统计
+        if side == "sell":
+            stop_price = None
         cur = conn.execute(
             """INSERT INTO trades (symbol, side, price, qty, trade_date, signal_id, rule_id,
-                                   followed, deviation, mood, position_pct, fee, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                   followed, deviation, mood, position_pct, fee, notes, stop_price)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol.strip().upper(), side, price, qty, td, signal_id, rule_id,
-             int(followed), deviation, mood, position_pct, fee, notes),
+             int(followed), deviation, mood, position_pct, fee, notes, stop_price),
         )
         return int(cur.lastrowid)
 

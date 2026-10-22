@@ -24,6 +24,7 @@ from .stats import (
     execution_gap,
     mood_breakdown,
     overview,
+    risk_coverage,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -53,6 +54,8 @@ class RuleIn(BaseModel):
     hypothesis: str = ""
     notes: str = ""
     version: str = "v1"
+    # 默认止损幅度（%），仅用于 R 倍数兜底；每笔交易可单独填真实止损价
+    stop_loss_pct: float | None = Field(None, gt=0.3, le=50)
 
 
 class RulePatch(BaseModel):
@@ -63,6 +66,7 @@ class RulePatch(BaseModel):
     notes: str | None = None
     active: int | None = None
     version: str | None = None
+    stop_loss_pct: float | None = Field(None, gt=0.3, le=50)
 
 
 class SignalIn(BaseModel):
@@ -88,6 +92,8 @@ class TradeIn(BaseModel):
     position_pct: float = 0.0
     fee: float = 0.0
     notes: str = ""
+    # 开仓时设定的止损价，必须低于买入价才合理
+    stop_price: float | None = Field(None, gt=0)
 
 
 class ReviewIn(BaseModel):
@@ -132,7 +138,13 @@ def api_create_rule(rule: RuleIn) -> dict[str, int]:
     if not ok:
         raise HTTPException(400, f"规则条件有误：{err}")
     return {"id": repo.create_rule(
-        rule.name, rule.condition, rule.kind, rule.hypothesis, rule.notes, rule.version
+        name=rule.name,
+        condition=rule.condition,
+        kind=rule.kind,
+        hypothesis=rule.hypothesis,
+        notes=rule.notes,
+        version=rule.version,
+        stop_loss_pct=rule.stop_loss_pct,
     )}
 
 
@@ -221,6 +233,14 @@ def api_trades(limit: int = 200, symbol: str | None = None) -> dict[str, Any]:
 
 @app.post("/api/trades", status_code=201)
 def api_create_trade(trade: TradeIn) -> dict[str, int]:
+    # 止损价填反是最常见的手误，这里挡掉，否则 R 倍数会被算成负数或离谱值
+    if trade.side == "buy" and trade.stop_price is not None:
+        if trade.stop_price >= trade.price:
+            raise HTTPException(
+                400,
+                f"买入止损价 {trade.stop_price} 必须低于买入价 {trade.price}，"
+                f"否则不是止损而是止盈",
+            )
     return {"id": repo.create_trade(**trade.model_dump())}
 
 
@@ -246,8 +266,8 @@ def api_create_review(review: ReviewIn) -> dict[str, int]:
 
 @app.get("/api/stats")
 def api_stats() -> dict[str, Any]:
-    trips = build_round_trips(repo.all_trades())
     rules = repo.rules_map()
+    trips = build_round_trips(repo.all_trades(), rules)
 
     by_rule = []
     for s in compute_rule_stats(trips, rules):
@@ -280,6 +300,7 @@ def api_stats() -> dict[str, Any]:
         "moods": mood_breakdown(trips),
         "attribution": repo.attribution_breakdown(),
         "streak": repo.streak_days(),
+        "risk_coverage": risk_coverage(trips),
         "round_trips": [
             {
                 "symbol": t.symbol,
@@ -291,6 +312,9 @@ def api_stats() -> dict[str, Any]:
                 "held_days": t.held_days,
                 "followed": t.followed,
                 "mood": t.mood,
+                "risk_pct": t.risk_pct,
+                "r_multiple": t.r_multiple,
+                "risk_source": t.risk_source,
             }
             for t in sorted(trips, key=lambda x: x.close_date, reverse=True)[:50]
         ],

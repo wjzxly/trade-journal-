@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS rules (
     version     TEXT    NOT NULL DEFAULT 'v1',
     hypothesis  TEXT    DEFAULT '',      -- 这条规则押注的是什么市场规律
     notes       TEXT    DEFAULT '',
+    -- 这条规则默认的止损幅度（%）。R 倍数需要一个「1R 等于亏多少」的基准，
+    -- 每笔交易可以单独填真实止损价，这个值只作为没填时的兜底。
+    stop_loss_pct REAL  DEFAULT NULL,
     active      INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     retired_at  TEXT
@@ -75,6 +78,9 @@ CREATE TABLE IF NOT EXISTS trades (
     -- 情绪：下单那一刻的状态，用于长期挖掘亏损模式
     mood        TEXT    DEFAULT '',
     position_pct REAL   DEFAULT 0,       -- 占仓位比例 0~100
+    -- 开仓时设定的止损价。只有买入有意义，卖出留空。
+    -- 这是 R 倍数精度的关键：同样是赚 10%，止损 2% 和止损 20% 完全不是一个水平。
+    stop_price  REAL    DEFAULT NULL,
     fee         REAL    DEFAULT 0,
     notes       TEXT    DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -120,9 +126,29 @@ def init_db(db_path: str | Path | None = None) -> None:
     conn = connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+# 后续新增的列。SQLite 的 CREATE TABLE IF NOT EXISTS 不会给老表补列，
+# 所以已有数据库必须显式 ALTER。每条迁移都可重复执行。
+_MIGRATIONS: list[tuple[str, str, str]] = [
+    # (表名, 列名, 列定义)
+    ("rules", "stop_loss_pct", "REAL DEFAULT NULL"),
+    ("trades", "stop_price", "REAL DEFAULT NULL"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """给已存在的表补上新增列，老数据库升级时不丢数据。"""
+    for table, column, ddl in _MIGRATIONS:
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not cols:  # 表还不存在（SCHEMA 刚建好不会有这种情况）
+            continue
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
 @contextmanager
