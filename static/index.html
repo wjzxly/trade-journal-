@@ -125,6 +125,7 @@
 
   <!-- ============ 统计 ============ -->
   <section id="tab-dash" class="on">
+    <div id="onboarding"></div>
     <div class="grid g4" id="metrics" style="margin-bottom:16px"></div>
 
     <div class="card" style="margin-bottom:16px">
@@ -375,6 +376,31 @@ async function loadDash() {
   const d = await api('/api/stats');
   const o = d.overview;
   $('#streak').textContent = `连续记录 ${d.streak} 天`;
+
+  // 新用户引导：一堆 0 会让人不知道从哪下手，先给三步顺序
+  const isEmpty = o.round_trips === 0;
+  $('#onboarding').innerHTML = isEmpty ? `
+    <div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent)">
+      <h2>开始之前，先做这三件事</h2>
+      <div class="hint">现在是空库。别急着记交易——没有规则的记录只是流水账，验证不了任何东西。</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:14px">
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:6px">第 1 步</div>
+          <div style="font-weight:600;margin-bottom:4px">写下 2~3 条规则</div>
+          <div class="muted">去「规则库」，把你最有把握的经验写成可判定的条件。写的时候要能回答：触发时我还需要犹豫吗？</div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:6px">第 2 步</div>
+          <div style="font-weight:600;margin-bottom:4px">每笔都填止损价</div>
+          <div class="muted">止损价决定 R 倍数的分母。不填会退回规则默认，再没有只能按 3% 估算，统计可信度会打折。</div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:12px;color:var(--accent);font-weight:700;margin-bottom:6px">第 3 步</div>
+          <div style="font-weight:600;margin-bottom:4px">攒够 30 笔再下结论</div>
+          <div class="muted">单条规则 30 个样本才有统计意义。前几周只看「执行偏差」，别看胜率。</div>
+        </div>
+      </div>
+    </div>` : '';
 
   const metrics = [
     { label: '完整交易', val: o.round_trips, note: 'FIFO 配对后的笔数', cls: '' },
