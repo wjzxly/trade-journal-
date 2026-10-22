@@ -133,6 +133,12 @@
       <div id="gap"></div>
     </div>
 
+    <div class="card" style="margin-bottom:16px">
+      <h2>R 倍数的口径</h2>
+      <div class="hint" id="risk-hint">R 的准确性取决于你填了多少真实止损价。这份统计不藏口径——用兜底值算出来的 R，可信度完全不同。</div>
+      <div id="riskcov"></div>
+    </div>
+
     <div class="grid g2" style="margin-bottom:16px">
       <div class="card">
         <h2>规则体检</h2>
@@ -176,6 +182,11 @@
           </div>
           <div class="field"><label>版本</label><input id="r-ver" value="v1"></div>
         </div>
+        <div class="field">
+          <label>默认止损 % <span class="muted" style="font-weight:400">（选填，决定 1R 有多大）</span></label>
+          <input id="r-stop" type="number" step="0.1" placeholder="4">
+          <div class="muted" style="margin-top:4px">R 倍数的分母。止损越紧，同样的盈利折算出的 R 越高；留空则用 3% 兜底。</div>
+        </div>
         <div class="field"><label>押注的市场规律（一句话）</label><input id="r-hyp" placeholder="放量站上20日线，短期有惯性"></div>
         <div class="field"><label>备注</label><textarea id="r-notes" style="min-height:48px"></textarea></div>
         <div class="actions">
@@ -213,6 +224,11 @@
           <div class="field"><label>价格</label><input id="t-price" type="number" step="0.01" placeholder="12.35"></div>
           <div class="field"><label>数量</label><input id="t-qty" type="number" placeholder="1000"></div>
           <div class="field"><label>费用</label><input id="t-fee" type="number" step="0.01" value="0"></div>
+        </div>
+        <div class="field">
+          <label>止损价 <span class="muted" style="font-weight:400">（选填，填了 R 倍数才准）</span></label>
+          <input id="t-stop" type="number" step="0.01" placeholder="11.85">
+          <div class="muted" style="margin-top:4px" id="t-stop-hint">不填则退回规则默认止损，再没有就用 3% 兜底</div>
         </div>
         <div class="row">
           <div class="field"><label>日期</label><input id="t-date" type="date"></div>
@@ -364,7 +380,7 @@ async function loadDash() {
     { label: '完整交易', val: o.round_trips, note: 'FIFO 配对后的笔数', cls: '' },
     { label: '累计盈亏', val: sign(o.total_pnl) + fmt(o.total_pnl), note: '扣除手续费', cls: pnlCls(o.total_pnl) },
     { label: '胜率', val: fmt(o.win_rate, 1) + '%', note: '盈利笔数 / 总笔数', cls: '' },
-    { label: '期望值 R', val: sign(o.expectancy_r) + fmt(o.expectancy_r), note: '以 3% 止损折算', cls: pnlCls(o.expectancy_r) },
+    { label: '期望值 R', val: sign(o.expectancy_r) + fmt(o.expectancy_r), note: `平均 1R = ${fmt(o.avg_risk_pct, 2)}%`, cls: pnlCls(o.expectancy_r) },
     { label: '盈亏比', val: fmt(o.profit_factor), note: '总盈利 / 总亏损', cls: '' },
     { label: '执行率', val: fmt(o.followed_rate, 1) + '%', note: '按规则执行的比例', cls: o.followed_rate >= 80 ? '' : 'down' },
     { label: '平均持仓', val: fmt(o.avg_held_days, 1) + ' 天', note: '中短线应在 3-15 天', cls: '' },
@@ -399,6 +415,31 @@ async function loadDash() {
         ${cell(g.deviated, 'bad', '偏离规则')}
       </div>
       <div style="border-top:1px solid var(--line);padding-top:13px;font-size:13px">${gapText}</div>`;
+  }
+
+  // R 倍数口径透明度
+  const rc = d.risk_coverage || { actual: 0, rule: 0, default: 0, total: 0, actual_rate: 0, default_rate: 0 };
+  if (!rc.total) {
+    $('#riskcov').innerHTML = '<div class="empty">还没有平仓记录</div>';
+  } else {
+    const seg = (n, color, label) => n > 0
+      ? `<div style="flex:${n};background:${color};height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:600" title="${label} ${n} 笔">${n}</div>`
+      : '';
+    const bad = rc.default_rate > 50;
+    $('#riskcov').innerHTML = `
+      <div style="display:flex;height:26px;border-radius:8px;overflow:hidden;margin-bottom:10px">
+        ${seg(rc.actual, 'var(--accent)', '真实止损')}
+        ${seg(rc.rule, '#8b93a0', '规则默认')}
+        ${seg(rc.default, bad ? 'var(--up)' : '#c9cfd8', '兜底 3%')}
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12.5px">
+        <span><b style="color:var(--accent)">${rc.actual}</b> 笔用了真实止损价</span>
+        <span><b>${rc.rule}</b> 笔用规则默认止损</span>
+        <span><b class="${bad ? 'up' : ''}">${rc.default}</b> 笔只能靠 3% 兜底</span>
+      </div>
+      ${bad ? `<div style="margin-top:10px;padding:9px 13px;background:#fdeceb;border-radius:10px;font-size:12.5px;color:var(--up)">
+        有 ${fmt(rc.default_rate, 0)}% 的样本缺少止损依据，期望值 R 这时的参考价值有限。记「记一笔」时把止损价填上，R 才靠得住。
+      </div>` : ''}`;
   }
 
   // 规则体检
@@ -441,15 +482,21 @@ async function loadDash() {
   if (!d.round_trips.length) {
     $('#trips').innerHTML = '<div class="empty">暂无已平仓交易</div>';
   } else {
+    const riskTag = s => s === 'actual' ? '<span class="tag ok" title="用了你填的真实止损价">实</span>'
+                       : s === 'rule' ? '<span class="tag flat" title="用规则的默认止损幅度">规</span>'
+                       : '<span class="tag warn" title="没有止损依据，按 3% 估算">估</span>';
     $('#trips').innerHTML = `<table><thead><tr>
         <th>代码</th><th>买入</th><th>卖出</th><th class="num">持仓</th>
-        <th class="num">盈亏%</th><th class="num">盈亏</th><th>执行</th><th>情绪</th>
+        <th class="num">盈亏%</th><th class="num">R</th><th class="num">1R</th>
+        <th class="num">盈亏</th><th>执行</th><th>情绪</th>
       </tr></thead><tbody>${d.round_trips.map(t => `<tr>
         <td style="font-weight:600">${esc(t.symbol)}</td>
         <td class="muted">${esc(t.open_date)}</td>
         <td class="muted">${esc(t.close_date)}</td>
         <td class="num">${t.held_days}天</td>
         <td class="num ${pnlCls(t.pnl_pct)}">${sign(t.pnl_pct)}${fmt(t.pnl_pct)}%</td>
+        <td class="num ${pnlCls(t.r_multiple)}">${sign(t.r_multiple)}${fmt(t.r_multiple)}</td>
+        <td class="num muted">${fmt(t.risk_pct)}% ${riskTag(t.risk_source)}</td>
         <td class="num ${pnlCls(t.pnl)}">${sign(t.pnl)}${fmt(t.pnl)}</td>
         <td>${t.followed ? '<span class="tag ok">按规则</span>' : '<span class="tag bad">偏离</span>'}</td>
         <td class="muted">${esc(t.mood) || '—'}</td>
@@ -501,6 +548,7 @@ async function checkRule() {
 }
 
 async function saveRule() {
+  const stopRaw = $('#r-stop').value.trim();
   const body = {
     name: $('#r-name').value.trim(),
     condition: $('#r-cond').value.trim(),
@@ -508,12 +556,13 @@ async function saveRule() {
     version: $('#r-ver').value.trim() || 'v1',
     hypothesis: $('#r-hyp').value.trim(),
     notes: $('#r-notes').value.trim(),
+    stop_loss_pct: stopRaw ? parseFloat(stopRaw) : null,
   };
   if (!body.name || !body.condition) return toast('规则名和条件都要填', true);
   try {
     await api('/api/rules', { method: 'POST', body });
     toast('规则已保存');
-    $('#r-name').value = ''; $('#r-cond').value = ''; $('#r-hyp').value = ''; $('#r-notes').value = '';
+    ['#r-name', '#r-cond', '#r-hyp', '#r-notes', '#r-stop'].forEach(s => $(s).value = '');
     loadRules();
   } catch (e) { toast(e.message, true); }
 }
@@ -548,6 +597,7 @@ async function loadTrades() {
 }
 
 async function saveTrade() {
+  const stopRaw = $('#t-stop').value.trim();
   const body = {
     symbol: $('#t-sym').value.trim(),
     side: $('#t-side').value,
@@ -561,12 +611,15 @@ async function saveTrade() {
     position_pct: parseFloat($('#t-pos').value || '0'),
     fee: parseFloat($('#t-fee').value || '0'),
     notes: $('#t-notes').value.trim(),
+    stop_price: stopRaw ? parseFloat(stopRaw) : null,
   };
   if (!body.symbol || !body.price || !body.qty) return toast('代码、价格、数量必填', true);
+  // 卖出单不设止损，避免误填污染 R 倍数统计
+  if (body.side === 'sell') body.stop_price = null;
   try {
     await api('/api/trades', { method: 'POST', body });
     toast('已记录');
-    ['#t-sym', '#t-price', '#t-qty', '#t-dev', '#t-notes'].forEach(s => $(s).value = '');
+    ['#t-sym', '#t-price', '#t-qty', '#t-dev', '#t-notes', '#t-stop'].forEach(s => $(s).value = '');
     loadTrades();
   } catch (e) { toast(e.message, true); }
 }
@@ -701,6 +754,39 @@ function loadAll() {
   loadReviews().catch(() => {});
 }
 $('#t-date').value = new Date().toISOString().slice(0, 10);
+
+// 止损输入时实时算出风险距离，顺手提醒「止损过宽」——这是最该被看见的提示
+function updateStopHint() {
+  const price = parseFloat($('#t-price').value);
+  const stop = parseFloat($('#t-stop').value);
+  const hint = $('#t-stop-hint');
+  if (!$('#t-stop').value.trim() || isNaN(price) || isNaN(stop)) {
+    hint.textContent = '不填则退回规则默认止损，再没有就用 3% 兜底';
+    hint.className = 'muted';
+    return;
+  }
+  const pct = (price - stop) / price * 100;
+  if (pct <= 0) {
+    hint.textContent = '止损价必须低于买入价，否则不是止损而是止盈';
+    hint.className = 'muted up';
+  } else if (pct > 8) {
+    hint.textContent = `1R = ${pct.toFixed(2)}%，止损偏宽。同样赚 10%，你需要扛住更大的回撤才拿到同样的 R`;
+    hint.className = 'muted up';
+  } else {
+    hint.textContent = `1R = ${pct.toFixed(2)}%，这个宽度合理`;
+    hint.className = 'muted';
+  }
+}
+$('#t-price').addEventListener('input', updateStopHint);
+$('#t-stop').addEventListener('input', updateStopHint);
+$('#t-side').addEventListener('change', () => {
+  // 卖出单不该填止损，直接置灰避免误填
+  const isSell = $('#t-side').value === 'sell';
+  $('#t-stop').disabled = isSell;
+  if (isSell) { $('#t-stop').value = ''; }
+  updateStopHint();
+});
+
 loadAll();
 </script>
 </body>
