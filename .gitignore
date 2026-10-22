@@ -7,10 +7,10 @@ build/
 venv/
 .env
 
-# 真实交易数据绝不入库
-data/*.db
-data/*.db-wal
-data/*.db-shm
+# 真实交易数据绝不入库。用 data/* 整体排除，
+# 避免以后新增的备份文件、导出文件漏掉——这是账户隐私，不能靠逐个列举兜住。
+data/*
+!data/.gitkeep
 
 .pytest_cache/
 .coverage
