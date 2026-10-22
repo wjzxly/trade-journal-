@@ -213,6 +213,121 @@ class TestExecutionGap:
         assert gap["followed"]["sample"] == 0
 
 
+class TestRiskBasis:
+    """R 倍数的分母来源：真实止损 > 规则默认 > 3% 兜底。"""
+
+    def _one(self, buy=10.0, sell=11.0, stop=None, rule_stop=None):
+        trades = [
+            _Row(trade(id=1, price=buy, stop_price=stop)),
+            _Row(trade(id=2, side="sell", price=sell, trade_date="2026-01-10")),
+        ]
+        rules = {1: _Row(id=1, name="R", version="v1", kind="entry", stop_loss_pct=rule_stop)}
+        return build_round_trips(trades, rules)[0]
+
+    def test_actual_stop_wins(self):
+        # 买 10，止损 9 → 1R = 10%；赚 1 → 1.0R
+        t = self._one(buy=10.0, sell=11.0, stop=9.0, rule_stop=4.0)
+        assert t.risk_pct == 10.0
+        assert t.risk_source == "actual"
+        assert t.r_multiple == 1.0
+
+    def test_tighter_stop_gives_higher_r(self):
+        """同样赚 10%，止损越紧 R 越高——这正是不能设太宽的原因。"""
+        tight = self._one(buy=10.0, sell=11.0, stop=9.8)   # 2% 风险
+        wide = self._one(buy=10.0, sell=11.0, stop=8.0)    # 20% 风险
+        assert tight.r_multiple > wide.r_multiple
+        assert tight.r_multiple == 5.0
+        assert wide.r_multiple == 0.5
+
+    def test_rule_default_used_when_no_stop(self):
+        t = self._one(buy=10.0, sell=10.6, stop=None, rule_stop=4.0)
+        assert t.risk_pct == 4.0
+        assert t.risk_source == "rule"
+        assert t.r_multiple == 1.5
+
+    def test_fallback_when_nothing_set(self):
+        t = self._one(buy=10.0, sell=10.3, stop=None, rule_stop=None)
+        assert t.risk_pct == 3.0
+        assert t.risk_source == "default"
+        assert t.r_multiple == 1.0
+
+    def test_unplanned_trade_falls_back(self):
+        """计划外操作没有规则，只能靠兜底。"""
+        trades = [
+            _Row(trade(id=1, price=10.0, rule_id=None)),
+            _Row(trade(id=2, side="sell", price=10.5, trade_date="2026-01-10", rule_id=None)),
+        ]
+        t = build_round_trips(trades, {})[0]
+        assert t.risk_source == "default"
+        assert t.risk_pct == 3.0
+
+    def test_stop_above_buy_ignored(self):
+        """止损价填得比买入价还高，说明填反了，不能拿来当风险基准。"""
+        t = self._one(buy=10.0, sell=10.5, stop=11.0, rule_stop=4.0)
+        assert t.risk_source == "rule"  # 退回规则默认
+        assert t.risk_pct == 4.0
+
+    def test_absurdly_tight_stop_rejected(self):
+        """止损距离 0.05% 这种多半是手误，会让 R 放大几十倍，必须过滤。"""
+        t = self._one(buy=10.0, sell=10.5, stop=9.995, rule_stop=4.0)
+        assert t.risk_source == "rule"
+
+    def test_rule_stop_out_of_range_ignored(self):
+        t = self._one(buy=10.0, sell=10.5, stop=None, rule_stop=80.0)
+        assert t.risk_source == "default"
+
+    def test_build_without_rules_argument(self):
+        """rules 参数可选，老调用方式不能崩。"""
+        trades = [
+            _Row(trade(id=1)),
+            _Row(trade(id=2, side="sell", price=11.0, trade_date="2026-01-10")),
+        ]
+        trips = build_round_trips(trades)
+        assert len(trips) == 1
+        assert trips[0].risk_source == "default"
+
+    def test_missing_stop_column_tolerated(self):
+        """老数据库没有 stop_price 列时，_row_get 应退回 None 而不是抛错。"""
+        class NoStopRow(dict):
+            def __getitem__(self, k):
+                if k == "stop_price":
+                    raise IndexError("no such column")
+                return super().__getitem__(k)
+
+        trades = [
+            NoStopRow(trade(id=1)),
+            NoStopRow(trade(id=2, side="sell", price=11.0, trade_date="2026-01-10")),
+        ]
+        trips = build_round_trips(trades)
+        assert trips[0].risk_source == "default"
+
+
+class TestRiskCoverage:
+    def test_counts_and_rates(self):
+        from trade_journal.stats import RoundTrip, risk_coverage
+
+        trips = [
+            RoundTrip("A", "2026-01-01", "2026-01-05", 10, 11, 100, 0, 1, True, "", 9.0),
+            RoundTrip("A", "2026-01-01", "2026-01-05", 10, 11, 100, 0, 1, True, "", 9.0),
+            RoundTrip("A", "2026-01-01", "2026-01-05", 10, 11, 100, 0, 1, True, "", None, 4.0),
+            RoundTrip("A", "2026-01-01", "2026-01-05", 10, 11, 100, 0, 1, True, "", None, None),
+        ]
+        rc = risk_coverage(trips)
+        assert rc["actual"] == 2
+        assert rc["rule"] == 1
+        assert rc["default"] == 1
+        assert rc["total"] == 4
+        assert rc["actual_rate"] == 50.0
+        assert rc["default_rate"] == 25.0
+
+    def test_empty(self):
+        from trade_journal.stats import risk_coverage
+
+        rc = risk_coverage([])
+        assert rc["total"] == 0
+        assert rc["actual_rate"] == 0.0
+
+
 class TestBootstrap:
     def test_ci_contains_mean(self):
         vals = [1.0, 2.0, 3.0, 4.0, 5.0, 2.5, 3.5] * 5

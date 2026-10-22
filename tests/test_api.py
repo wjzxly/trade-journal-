@@ -162,6 +162,110 @@ def test_rule_retire(client):
     assert active == []
 
 
+def test_trade_stop_above_buy_rejected(client):
+    """止损价填得比买入价高，说明填反了，必须拒绝而不是静默算出负风险。"""
+    r = client.post("/api/trades", json={
+        "symbol": "600522", "side": "buy", "price": 10.0, "qty": 100, "stop_price": 11.0,
+    })
+    assert r.status_code == 400
+    assert "止损" in r.json()["detail"]
+
+
+def test_sell_trade_stop_ignored(client):
+    """卖出单不该带止损，即使传了也应被清空，避免污染 R 倍数。"""
+    client.post("/api/trades", json={
+        "symbol": "600522", "side": "sell", "price": 10.0, "qty": 100, "stop_price": 9.0,
+    })
+    trade = client.get("/api/trades").json()["items"][0]
+    assert trade["stop_price"] is None
+
+
+def test_stop_price_flows_into_r_multiple(client):
+    rid = client.post("/api/rules", json={
+        "name": "带止损的规则", "condition": "close > ma20", "stop_loss_pct": 5.0,
+    }).json()["id"]
+
+    # 买 10 止损 9.5（5% 风险），卖 11（+10%）→ 2R
+    client.post("/api/trades", json={
+        "symbol": "600522", "side": "buy", "price": 10.0, "qty": 1000,
+        "trade_date": "2026-01-05", "rule_id": rid, "stop_price": 9.5,
+    })
+    client.post("/api/trades", json={
+        "symbol": "600522", "side": "sell", "price": 11.0, "qty": 1000,
+        "trade_date": "2026-01-10", "rule_id": rid,
+    })
+
+    stats = client.get("/api/stats").json()
+    trip = stats["round_trips"][0]
+    assert trip["risk_pct"] == 5.0
+    assert trip["risk_source"] == "actual"
+    assert trip["r_multiple"] == 2.0
+    assert stats["risk_coverage"]["actual"] == 1
+
+
+def test_rule_stop_pct_persisted(client):
+    client.post("/api/rules", json={
+        "name": "R", "condition": "close > 1", "stop_loss_pct": 4.5,
+    })
+    rule = client.get("/api/rules").json()["items"][0]
+    assert rule["stop_loss_pct"] == 4.5
+
+
+def test_rule_stop_pct_out_of_range_rejected(client):
+    r = client.post("/api/rules", json={
+        "name": "R", "condition": "close > 1", "stop_loss_pct": 0.1,
+    })
+    assert r.status_code == 422  # 过窄的止损没有意义
+
+
+def test_migration_adds_columns_to_old_db(tmp_path):
+    """老版本数据库升级后应自动补列，不丢数据。"""
+    import sqlite3
+
+    from trade_journal.db import init_db
+
+    db = tmp_path / "old.db"
+    # 手工造一个缺列的老表
+    conn = sqlite3.connect(str(db))
+    conn.executescript("""
+        CREATE TABLE rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'entry',
+            condition TEXT NOT NULL, version TEXT NOT NULL DEFAULT 'v1',
+            hypothesis TEXT DEFAULT '', notes TEXT DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            retired_at TEXT
+        );
+        CREATE TABLE trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT NOT NULL, side TEXT NOT NULL, price REAL NOT NULL,
+            qty INTEGER NOT NULL, trade_date TEXT NOT NULL,
+            signal_id INTEGER, rule_id INTEGER,
+            followed INTEGER NOT NULL DEFAULT 1, deviation TEXT DEFAULT '',
+            mood TEXT DEFAULT '', position_pct REAL DEFAULT 0,
+            fee REAL DEFAULT 0, notes TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO rules (name, condition) VALUES ('老规则', 'close > 1');
+    """)
+    conn.commit()
+    conn.close()
+
+    init_db(db)  # 触发迁移
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    rule_cols = {r["name"] for r in conn.execute("PRAGMA table_info(rules)")}
+    trade_cols = {r["name"] for r in conn.execute("PRAGMA table_info(trades)")}
+    old = conn.execute("SELECT name FROM rules").fetchone()
+    conn.close()
+
+    assert "stop_loss_pct" in rule_cols
+    assert "stop_price" in trade_cols
+    assert old["name"] == "老规则"  # 数据还在
+
+
 def test_index_page_served(client):
     r = client.get("/")
     assert r.status_code == 200
