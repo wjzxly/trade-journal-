@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trade-journal"
+version = "0.1.0"
+description = "个人交易经验终端：把交易经验写成可判定的规则，用自己的操作记录做统计检验"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "姚昭源" }]
+keywords = ["trading", "journal", "rule-engine", "backtest", "fastapi", "quant"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+trade-journal = "trade_journal.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["trade_journal*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
