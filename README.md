@@ -1,5 +1,9 @@
 # Trade Journal · 个人交易经验终端
 
+[![tests](https://github.com/wjzxly/trade-journal-/actions/workflows/ci.yml/badge.svg)](https://github.com/wjzxly/trade-journal-/actions/workflows/ci.yml)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 把「凭感觉炒股」变成「用可判定的规则交易，并用自己的操作记录做统计检验」。
 
 这不是一个选股工具，也不预测涨跌。它只回答一个问题：**我这套方法，在我自己的操作里，到底成不成立？**
